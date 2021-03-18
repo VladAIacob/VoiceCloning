@@ -132,7 +132,7 @@ def save_checkpoint(model, optimizer, learning_rate, iteration, filepath):
     torch.save({'model': model_for_saving,
                 'iteration': iteration,
                 'optimizer': optimizer.state_dict(),
-                'learning_rate': learning_rate}, filepath)
+                'learning_rate': learning_rate}, filepath, _use_new_zipfile_serialization=False)
 
 
 def compute_validation_loss(model, criterion, valset, collate_fn, batch_size,
@@ -146,12 +146,13 @@ def compute_validation_loss(model, criterion, valset, collate_fn, batch_size,
 
         val_loss, val_loss_nll, val_loss_gate = 0.0, 0.0, 0.0
         for batch in val_loader:
-            mel, speaker_vecs, text, in_lens, out_lens, gate_target, attn_prior = batch
-            mel, speaker_vecs, text = mel.cuda(), speaker_vecs.cuda(), text.cuda()
+            mel, embeds, speaker_vecs, text, in_lens, out_lens, gate_target, attn_prior = batch
+            mel, embeds, speaker_vecs, text = mel.cuda(), embeds.cuda(), speaker_vecs.cuda(), text.cuda()
+            #mel, speaker_vecs, text = mel.cuda(), speaker_vecs.cuda(), text.cuda()
             in_lens, out_lens, gate_target = in_lens.cuda(), out_lens.cuda(), gate_target.cuda()
             attn_prior = attn_prior.cuda() if valset.use_attn_prior else None
             z, log_s_list, gate_pred, attn, mean, log_var, prob = model(
-                mel, speaker_vecs, text, in_lens, out_lens, attn_prior)
+                mel, embeds, speaker_vecs, text, in_lens, out_lens, attn_prior)
 
             loss_nll, loss_gate = criterion(
                 (z, log_s_list, gate_pred, mean, log_var, prob),
@@ -250,13 +251,14 @@ def train(n_gpus, rank, output_directory, epochs, optim_algo, learning_rate,
         for batch in train_loader:
             model.zero_grad()
 
-            mel, speaker_vecs, text, in_lens, out_lens, gate_target, attn_prior = batch
-            mel, speaker_vecs, text = mel.cuda(), speaker_vecs.cuda(), text.cuda()
+            mel, embeds, speaker_vecs, text, in_lens, out_lens, gate_target, attn_prior = batch
+            mel, embeds, speaker_vecs, text = mel.cuda(), embeds.cuda(), speaker_vecs.cuda(), text.cuda()
+            #mel, speaker_vecs, text = mel.cuda(), speaker_vecs.cuda(), text.cuda()
             in_lens, out_lens, gate_target = in_lens.cuda(), out_lens.cuda(), gate_target.cuda()
             attn_prior = attn_prior.cuda() if valset.use_attn_prior else None
             with amp.autocast(enabled=fp16_run):
                 z, log_s_list, gate_pred, attn, mean, log_var, prob = model(
-                    mel, speaker_vecs, text, in_lens, out_lens, attn_prior)
+                    mel, embeds, speaker_vecs, text, in_lens, out_lens, attn_prior)
 
                 loss_nll, loss_gate = criterion(
                     (z, log_s_list, gate_pred, mean, log_var, prob),
@@ -299,7 +301,7 @@ def train(n_gpus, rank, output_directory, epochs, optim_algo, learning_rate,
                             val_loss, val_loss_nll, val_loss_gate, attns,
                             gate_pred, gate_target, iteration)
 
-                    checkpoint_path = "{}/model_{}".format(
+                    checkpoint_path = "{}/model_{}.pt".format(
                         output_directory, iteration)
                     save_checkpoint(model, optimizer, learning_rate, iteration,
                                     checkpoint_path)

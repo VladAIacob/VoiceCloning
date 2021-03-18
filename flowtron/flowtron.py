@@ -638,7 +638,7 @@ class AR_Step(torch.nn.Module):
 
 
 class Flowtron(torch.nn.Module):
-    def __init__(self, n_speakers, n_speaker_dim, n_text, n_text_dim, n_flows,
+    def __init__(self, n_speakers, n_speaker_dim, n_speaker_features, n_text, n_text_dim, n_flows,
                  n_mel_channels, n_hidden, n_attn_channels, n_lstm_layers,
                  use_gate_layer, mel_encoder_n_hidden, n_components,
                  fixed_gaussian, mean_scale, dummy_speaker_embedding,
@@ -662,21 +662,21 @@ class Flowtron(torch.nn.Module):
         for i in range(n_flows):
             add_gate = True if (i == (n_flows-1) and use_gate_layer) else False
             if i % 2 == 0:
-                self.flows.append(AR_Step(n_mel_channels, n_speaker_dim,
+                self.flows.append(AR_Step(n_mel_channels, n_speaker_dim + n_speaker_features,
                                           n_text_dim,
-                                          n_mel_channels+n_speaker_dim,
+                                          n_mel_channels + n_speaker_dim + n_speaker_features,
                                           n_hidden, n_attn_channels,
                                           n_lstm_layers, add_gate,
                                           use_cumm_attention))
             else:
-                self.flows.append(AR_Back_Step(n_mel_channels, n_speaker_dim,
+                self.flows.append(AR_Back_Step(n_mel_channels, n_speaker_dim + n_speaker_features,
                                                n_text_dim,
-                                               n_mel_channels+n_speaker_dim,
+                                               n_mel_channels + n_speaker_dim + n_speaker_features,
                                                n_hidden, n_attn_channels,
                                                n_lstm_layers, add_gate,
                                                use_cumm_attention))
 
-    def forward(self, mel, speaker_ids, text, in_lens, out_lens,
+    def forward(self, mel, embeds, speaker_ids, text, in_lens, out_lens,
                 attn_prior=None):
         speaker_ids = speaker_ids*0 if self.dummy_speaker_embedding else speaker_ids
         speaker_vecs = self.speaker_embedding(speaker_ids)
@@ -691,9 +691,9 @@ class Flowtron(torch.nn.Module):
 
         text = text.transpose(0, 1)
         mel = mel.permute(2, 0, 1)
-
+        
         encoder_outputs = torch.cat(
-            [text, speaker_vecs.expand(text.size(0), -1, -1)], 2)
+            [text, torch.cat([speaker_vecs, embeds], -1).expand(text.size(0), -1, -1)], 2)
         log_s_list = []
         attns_list = []
         mask = ~get_mask_from_lengths(in_lens)[..., None]
@@ -704,7 +704,7 @@ class Flowtron(torch.nn.Module):
             attns_list.append(attn)
         return mel, log_s_list, gate, attns_list, mean, log_var, prob
 
-    def infer(self, residual, speaker_ids, text, temperature=1.0,
+    def infer(self, residual, embeds, speaker_ids, text, temperature=1.0,
               gate_threshold=0.5, attns=None, attn_prior=None):
         """Inference function. Inverse of the forward pass
 
@@ -723,8 +723,9 @@ class Flowtron(torch.nn.Module):
         text = self.embedding(text).transpose(1, 2)
         text = self.encoder.infer(text)
         text = text.transpose(0, 1)
+        
         encoder_outputs = torch.cat(
-            [text, speaker_vecs.expand(text.size(0), -1, -1)], 2)
+            [text, torch.cat([speaker_vecs, embeds], -1).expand(text.size(0), -1, -1)], 2)
         residual = residual.permute(2, 0, 1)
         attention_weights = []
         for i, flow in enumerate(reversed(self.flows)):

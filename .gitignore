@@ -1,0 +1,8 @@
+data/*
+log
+flowtron/__pycache__
+flowtron/text/__pycache__
+flowtron/tacotron2/waveglow/__pycache__
+flowtron/tacotron2/waveglow/saved_models/
+flowtron/results/
+encoder/saved_models

@@ -1,6 +1,6 @@
 {
     "train_config": {
-        "output_directory": "/outdir",
+        "output_directory": "../data/VoiceCloning/flowtron",
         "epochs": 10000000,
         "optim_algo": "RAdam",
         "learning_rate": 1e-3,

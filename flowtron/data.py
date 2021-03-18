@@ -81,11 +81,11 @@ class Data(torch.utils.data.Dataset):
         self.text_cleaners = text_cleaners
         self.p_arpabet = p_arpabet
         self.cmudict = cmudict.CMUDict(cmudict_path, keep_ambiguous=keep_ambiguous)
-        if speaker_ids is None:
+        '''if speaker_ids is None:
             self.speaker_ids = self.create_speaker_lookup_table(self.audiopaths_and_text)
         else:
             self.speaker_ids = speaker_ids
-
+		  '''
         random.seed(seed)
         if randomize:
             random.shuffle(self.audiopaths_and_text)
@@ -124,15 +124,19 @@ class Data(torch.utils.data.Dataset):
                          for word in words])
         text_norm = torch.LongTensor(text_to_sequence(text))
         return text_norm
+        
+    def get_embeds(self, embeds):
+        return torch.from_numpy(np.array(embeds))
 
     def __getitem__(self, index):
         # Read audio and text
         audiopath, text, speaker_id = self.audiopaths_and_text[index]
         audio, sampling_rate = load_wav_to_torch(audiopath)
-        if sampling_rate != self.sampling_rate:
-            raise ValueError("{} SR doesn't match target {} SR".format(
-                sampling_rate, self.sampling_rate))
-
+        embeds = np.load(audiopath.replace(".wav", ".npy"))
+        '''if sampling_rate != self.sampling_rate:
+            raise ValueError("{} SR doesn't match target {} SR, in {}".format(
+                sampling_rate, self.sampling_rate, audiopath))
+		  '''
         mel = self.get_mel(audio)
         text_encoded = self.get_text(text)
         speaker_id = self.get_speaker_id(speaker_id)
@@ -141,7 +145,7 @@ class Data(torch.utils.data.Dataset):
             attn_prior = self.compute_attention_prior(
                 audiopath, mel.shape[1], text_encoded.shape[0])
 
-        return (mel, speaker_id, text_encoded, attn_prior)
+        return (mel, embeds, speaker_id, text_encoded, attn_prior)
 
     def __len__(self):
         return len(self.audiopaths_and_text)
@@ -157,14 +161,14 @@ class DataCollate():
         """Collate's training batch from normalized text and mel-spectrogram """
         # Right zero-pad all one-hot text sequences to max input length
         input_lengths, ids_sorted_decreasing = torch.sort(
-            torch.LongTensor([len(x[2]) for x in batch]),
+            torch.LongTensor([len(x[3]) for x in batch]),
             dim=0, descending=True)
         max_input_len = input_lengths[0].item()
 
         text_padded = torch.LongTensor(len(batch), max_input_len)
         text_padded.zero_()
         for i in range(len(ids_sorted_decreasing)):
-            text = batch[ids_sorted_decreasing[i]][2]
+            text = batch[ids_sorted_decreasing[i]][3]
             text_padded[i, :text.size(0)] = text
 
         # Right zero-pad mel-spec
@@ -185,18 +189,22 @@ class DataCollate():
         if self.use_attn_prior:
             attn_prior_padded = torch.FloatTensor(len(batch), max_target_len, max_input_len)
             attn_prior_padded.zero_()
+            
         speaker_ids = torch.LongTensor(len(batch))
+        #embeds = torch.LongTensor(len(batch))
+        embeds = [None for _ in range(len(ids_sorted_decreasing))]
         for i in range(len(ids_sorted_decreasing)):
             mel = batch[ids_sorted_decreasing[i]][0]
             mel_padded[i, :, :mel.size(1)] = mel
             gate_padded[i, mel.size(1)-1:] = 1
             output_lengths[i] = mel.size(1)
-            speaker_ids[i] = batch[ids_sorted_decreasing[i]][1]
+            speaker_ids[i] = batch[ids_sorted_decreasing[i]][2]
+            embeds[i] = batch[ids_sorted_decreasing[i]][1]
             if self.use_attn_prior:
-                cur_attn_prior = batch[ids_sorted_decreasing[i]][3]
+                cur_attn_prior = batch[ids_sorted_decreasing[i]][4]
                 attn_prior_padded[i, :cur_attn_prior.size(0), :cur_attn_prior.size(1)] = cur_attn_prior
 
-        return mel_padded, speaker_ids, text_padded, input_lengths, output_lengths, gate_padded, attn_prior_padded
+        return mel_padded, torch.from_numpy(np.array(embeds)), speaker_ids, text_padded, input_lengths, output_lengths, gate_padded, attn_prior_padded
 
 
 # ===================================================================
