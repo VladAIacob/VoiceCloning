@@ -62,7 +62,7 @@ def prepare_dataloaders(data_config, n_gpus, batch_size):
 
     valset = Data(data_config['validation_files'],
                   **dict((k, v) for k, v in data_config.items()
-                  if k not in ignore_keys), speaker_ids=trainset.speaker_ids)
+                  if k not in ignore_keys))
 
     collate_fn = DataCollate(
         n_frames_per_step=1, use_attn_prior=trainset.use_attn_prior)
@@ -92,14 +92,13 @@ def warmstart(checkpoint_path, model, include_layers=None):
                            if any(l in k for l in include_layers)}
 
     model_dict = model.state_dict()
+    #model_dict.pop("embedding.weight")
     pretrained_dict = {k: v for k, v in pretrained_dict.items()
                        if k in model_dict}
-
-    if pretrained_dict['speaker_embedding.weight'].shape != model_dict['speaker_embedding.weight'].shape:
-        del pretrained_dict['speaker_embedding.weight']
+	
 
     model_dict.update(pretrained_dict)
-    model.load_state_dict(model_dict)
+    model.load_state_dict(model_dict, strict=False)
     return model
 
 
@@ -146,13 +145,13 @@ def compute_validation_loss(model, criterion, valset, collate_fn, batch_size,
 
         val_loss, val_loss_nll, val_loss_gate = 0.0, 0.0, 0.0
         for batch in val_loader:
-            mel, embeds, speaker_vecs, text, in_lens, out_lens, gate_target, attn_prior = batch
-            mel, embeds, speaker_vecs, text = mel.cuda(), embeds.cuda(), speaker_vecs.cuda(), text.cuda()
-            #mel, speaker_vecs, text = mel.cuda(), speaker_vecs.cuda(), text.cuda()
+            mel, embeds, text, in_lens, out_lens, gate_target, attn_prior = batch
+            mel, embeds, text = mel.cuda(), embeds.cuda(), text.cuda()
+
             in_lens, out_lens, gate_target = in_lens.cuda(), out_lens.cuda(), gate_target.cuda()
             attn_prior = attn_prior.cuda() if valset.use_attn_prior else None
             z, log_s_list, gate_pred, attn, mean, log_var, prob = model(
-                mel, embeds, speaker_vecs, text, in_lens, out_lens, attn_prior)
+                mel, embeds, text, in_lens, out_lens, attn_prior)
 
             loss_nll, loss_gate = criterion(
                 (z, log_s_list, gate_pred, mean, log_var, prob),
@@ -176,7 +175,7 @@ def compute_validation_loss(model, criterion, valset, collate_fn, batch_size,
     return val_loss, val_loss_nll, val_loss_gate, attn, gate_pred, gate_target
 
 
-def train(n_gpus, rank, output_directory, epochs, optim_algo, learning_rate,
+def train(validate, n_gpus, rank, output_directory, epochs, optim_algo, learning_rate,
           weight_decay, sigma, iters_per_checkpoint, batch_size, seed,
           checkpoint_path, ignore_layers, include_layers, finetune_layers,
           warmstart_checkpoint_path, with_tensorboard, grad_clip_val,
@@ -251,14 +250,14 @@ def train(n_gpus, rank, output_directory, epochs, optim_algo, learning_rate,
         for batch in train_loader:
             model.zero_grad()
 
-            mel, embeds, speaker_vecs, text, in_lens, out_lens, gate_target, attn_prior = batch
-            mel, embeds, speaker_vecs, text = mel.cuda(), embeds.cuda(), speaker_vecs.cuda(), text.cuda()
-            #mel, speaker_vecs, text = mel.cuda(), speaker_vecs.cuda(), text.cuda()
+            mel, embeds, text, in_lens, out_lens, gate_target, attn_prior = batch
+            mel, embeds, text = mel.cuda(), embeds.cuda(), text.cuda()
+
             in_lens, out_lens, gate_target = in_lens.cuda(), out_lens.cuda(), gate_target.cuda()
             attn_prior = attn_prior.cuda() if valset.use_attn_prior else None
             with amp.autocast(enabled=fp16_run):
                 z, log_s_list, gate_pred, attn, mean, log_var, prob = model(
-                    mel, embeds, speaker_vecs, text, in_lens, out_lens, attn_prior)
+                    mel, embeds, text, in_lens, out_lens, attn_prior)
 
                 loss_nll, loss_gate = criterion(
                     (z, log_s_list, gate_pred, mean, log_var, prob),
@@ -292,18 +291,19 @@ def train(n_gpus, rank, output_directory, epochs, optim_algo, learning_rate,
                 logger.add_scalar('learning_rate', learning_rate, iteration)
 
             if iteration % iters_per_checkpoint == 0:
-                val_loss, val_loss_nll, val_loss_gate, attns, gate_pred, gate_target = compute_validation_loss(
-                    model, criterion, valset, collate_fn, batch_size, n_gpus)
-                if rank == 0:
-                    print("Validation loss {}: {:9f}  ".format(iteration, val_loss))
-                    if with_tensorboard:
-                        logger.log_validation(
-                            val_loss, val_loss_nll, val_loss_gate, attns,
-                            gate_pred, gate_target, iteration)
-
-                    checkpoint_path = "{}/model_{}.pt".format(
-                        output_directory, iteration)
-                    save_checkpoint(model, optimizer, learning_rate, iteration,
+                if validate:
+                    val_loss, val_loss_nll, val_loss_gate, attns, gate_pred, gate_target = compute_validation_loss(
+                        model, criterion, valset, collate_fn, batch_size, n_gpus)
+                    if rank == 0:
+                        print("Validation loss {}: {:9f}  ".format(iteration, val_loss))
+                        if with_tensorboard:
+                            logger.log_validation(
+                                val_loss, val_loss_nll, val_loss_gate, attns,
+                                gate_pred, gate_target, iteration)
+                
+                checkpoint_path = "{}/model_{}.pt".format(
+                                       output_directory, iteration)
+                save_checkpoint(model, optimizer, learning_rate, iteration,
                                     checkpoint_path)
 
             iteration += 1
@@ -313,6 +313,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-c', '--config', type=str,
                         help='JSON file for configuration')
+    parser.add_argument('-v', '--val', type=bool, help='validate', default = False)
     parser.add_argument('-p', '--params', nargs='+', default=[])
     args = parser.parse_args()
     args.rank = 0
@@ -344,4 +345,4 @@ if __name__ == "__main__":
 
     torch.backends.cudnn.enabled = True
     torch.backends.cudnn.benchmark = False
-    train(n_gpus, rank, **train_config)
+    train(args.val, n_gpus, rank, **train_config)

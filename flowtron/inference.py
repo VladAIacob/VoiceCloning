@@ -37,7 +37,7 @@ from glow import WaveGlow
 from scipy.io.wavfile import write
 
 
-def infer(flowtron_path, waveglow_path, output_dir, text, embeds, speaker_id, n_frames,
+def infer(flowtron_path, waveglow_path, output_dir, text, embeds, n_frames,
           sigma, gate_threshold, seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
@@ -60,24 +60,22 @@ def infer(flowtron_path, waveglow_path, output_dir, text, embeds, speaker_id, n_
     trainset = Data(
         data_config['training_files'],
         **dict((k, v) for k, v in data_config.items() if k not in ignore_keys))
-    speaker_vecs = trainset.get_speaker_id(speaker_id).cuda()
     text = trainset.get_text(text).cuda()
     embeds = trainset.get_embeds(embeds).cuda()
-    speaker_vecs = speaker_vecs[None]
     text = text[None]
     embeds = embeds[None]
 
     with torch.no_grad():
         residual = torch.cuda.FloatTensor(1, 80, n_frames).normal_() * sigma
         mels, attentions = model.infer(
-            residual, embeds, speaker_vecs, text, gate_threshold=gate_threshold)
+            residual, embeds, text, gate_threshold=gate_threshold)
 
     for k in range(len(attentions)):
         attention = torch.cat(attentions[k]).cpu().numpy()
         fig, axes = plt.subplots(1, 2, figsize=(16, 4))
         axes[0].imshow(mels[0].cpu().numpy(), origin='lower', aspect='auto')
         axes[1].imshow(attention[:, 0].transpose(), origin='lower', aspect='auto')
-        fig.savefig(os.path.join(output_dir, 'sid{}_sigma{}_attnlayer{}.png'.format(speaker_id, sigma, k)))
+        fig.savefig(os.path.join(output_dir, 'sigma{}_attnlayer{}.png'.format(sigma, k)))
         plt.close("all")
 
     with torch.no_grad():
@@ -88,7 +86,7 @@ def infer(flowtron_path, waveglow_path, output_dir, text, embeds, speaker_id, n_
     audio = audio / np.abs(audio).max()
     print(audio.shape)
 
-    write(os.path.join(output_dir, 'sid{}_sigma{}.wav'.format(speaker_id, sigma)),
+    write(os.path.join(output_dir, 'sigma{}.wav'.format(sigma)),
           data_config['sampling_rate'], audio)
 
 
@@ -103,7 +101,6 @@ if __name__ == "__main__":
                         help='Path to waveglow state dict', type=str)
     parser.add_argument('-t', '--text', help='Text to synthesize', type=str)
     #parser.add_argument('-e', '--embeds', help='Embeds of speaker voice')
-    parser.add_argument('-i', '--id', help='Speaker id', type=int)
     parser.add_argument('-n', '--n_frames', help='Number of frames',
                         default=400, type=int)
     parser.add_argument('-o', "--output_dir", default="results/")
@@ -132,9 +129,7 @@ if __name__ == "__main__":
     torch.backends.cudnn.enabled = True
     torch.backends.cudnn.benchmark = False
     
-    embeds = np.load("../data/LJSpeech-1.1/wavs/LJ001-0001.npy")
-    print("Embeds: ")
-    print(embeds)
+    embeds = np.load("../data/LibriSpeech/train-clean-100/7078/271888/7078_271888_000003_000001.npy")
     
     infer(args.flowtron_path, args.waveglow_path, args.output_dir, args.text, [embeds], #args.embeds,
-          args.id, args.n_frames, args.sigma, args.gate, args.seed)
+			 args.n_frames, args.sigma, args.gate, args.seed)
