@@ -24,8 +24,11 @@ import json
 import sys
 import numpy as np
 import torch
+import librosa
 
-
+sys.path.insert(0, "../")
+from encoder import inference as encoder
+from pathlib import Path
 from flowtron import Flowtron
 from torch.utils.data import DataLoader
 from data import Data
@@ -36,6 +39,15 @@ sys.path.insert(0, "tacotron2/waveglow")
 from glow import WaveGlow
 from scipy.io.wavfile import write
 
+def embed_utterance(fpaths, encoder_model_fpath):
+    if not encoder.is_loaded():
+        encoder.load_model(encoder_model_fpath)
+
+    # Compute the speaker embedding of the utterance
+    wav_fpath = fpaths
+    wav, rate = librosa.load(wav_fpath)
+    wav = encoder.preprocess_wav(wav, rate)
+    return encoder.embed_utterance(wav)
 
 def infer(flowtron_path, waveglow_path, output_dir, text, embeds, n_frames,
           sigma, gate_threshold, seed):
@@ -100,7 +112,7 @@ if __name__ == "__main__":
     parser.add_argument('-w', '--waveglow_path',
                         help='Path to waveglow state dict', type=str)
     parser.add_argument('-t', '--text', help='Text to synthesize', type=str)
-    #parser.add_argument('-e', '--embeds', help='Embeds of speaker voice')
+    parser.add_argument('-e', '--embeds', help='Speaker voice', type=str)
     parser.add_argument('-n', '--n_frames', help='Number of frames',
                         default=400, type=int)
     parser.add_argument('-o', "--output_dir", default="results/")
@@ -128,8 +140,8 @@ if __name__ == "__main__":
 
     torch.backends.cudnn.enabled = True
     torch.backends.cudnn.benchmark = False
-    
-    embeds = np.load("../data/LibriSpeech/train-clean-100/7078/271888/7078_271888_000003_000001.npy")
+   
+    embeds = embed_utterance(args.embeds, Path("../encoder/saved_models/pretrained.pt"))
     
     infer(args.flowtron_path, args.waveglow_path, args.output_dir, args.text, [embeds], #args.embeds,
 			 args.n_frames, args.sigma, args.gate, args.seed)
