@@ -248,65 +248,68 @@ def train(validate, n_gpus, rank, output_directory, epochs, optim_algo, learning
     for epoch in range(epoch_offset, epochs):
         print("Epoch: {}".format(epoch))
         for batch in train_loader:
-            model.zero_grad()
+            try:
+                model.zero_grad()
 
-            mel, embeds, text, in_lens, out_lens, gate_target, attn_prior = batch
-            mel, embeds, text = mel.cuda(), embeds.cuda(), text.cuda()
+                mel, embeds, text, in_lens, out_lens, gate_target, attn_prior = batch
+                mel, embeds, text = mel.cuda(), embeds.cuda(), text.cuda()
 
-            in_lens, out_lens, gate_target = in_lens.cuda(), out_lens.cuda(), gate_target.cuda()
-            attn_prior = attn_prior.cuda() if valset.use_attn_prior else None
-            with amp.autocast(enabled=fp16_run):
-                z, log_s_list, gate_pred, attn, mean, log_var, prob = model(
-                    mel, embeds, text, in_lens, out_lens, attn_prior)
+                in_lens, out_lens, gate_target = in_lens.cuda(), out_lens.cuda(), gate_target.cuda()
+                attn_prior = attn_prior.cuda() if valset.use_attn_prior else None
+                with amp.autocast(enabled=fp16_run):
+                    z, log_s_list, gate_pred, attn, mean, log_var, prob = model(
+                        mel, embeds, text, in_lens, out_lens, attn_prior)
 
-                loss_nll, loss_gate = criterion(
-                    (z, log_s_list, gate_pred, mean, log_var, prob),
-                    gate_target, out_lens)
-                loss = loss_nll + loss_gate
+                    loss_nll, loss_gate = criterion(
+                        (z, log_s_list, gate_pred, mean, log_var, prob),
+                        gate_target, out_lens)
+                    loss = loss_nll + loss_gate
 
-            if n_gpus > 1:
-                reduced_loss = reduce_tensor(loss.data, n_gpus).item()
-                reduced_gate_loss = reduce_tensor(loss_gate.data, n_gpus).item()
-                reduced_nll_loss = reduce_tensor(loss_nll.data, n_gpus).item()
-            else:
-                reduced_loss = loss.item()
-                reduced_gate_loss = loss_gate.item()
-                reduced_nll_loss = loss_nll.item()
+                if n_gpus > 1:
+                    reduced_loss = reduce_tensor(loss.data, n_gpus).item()
+                    reduced_gate_loss = reduce_tensor(loss_gate.data, n_gpus).item()
+                    reduced_nll_loss = reduce_tensor(loss_nll.data, n_gpus).item()
+                else:
+                    reduced_loss = loss.item()
+                    reduced_gate_loss = loss_gate.item()
+                    reduced_nll_loss = loss_nll.item()
 
-            scaler.scale(loss).backward()
-            if grad_clip_val > 0:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_val)
+                scaler.scale(loss).backward()
+                if grad_clip_val > 0:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_val)
 
-            scaler.step(optimizer)
-            scaler.update()
+                scaler.step(optimizer)
+                scaler.update()
 
-            if rank == 0:
-                print("{}:\t{:.9f}".format(iteration, reduced_loss), flush=True)
+                if rank == 0:
+                    print("{}:\t{:.9f}".format(iteration, reduced_loss), flush=True)
 
-            if with_tensorboard and rank == 0:
-                logger.add_scalar('training_loss', reduced_loss, iteration)
-                logger.add_scalar('training_loss_gate', reduced_gate_loss, iteration)
-                logger.add_scalar('training_loss_nll', reduced_nll_loss, iteration)
-                logger.add_scalar('learning_rate', learning_rate, iteration)
+                if with_tensorboard and rank == 0:
+                    logger.add_scalar('training_loss', reduced_loss, iteration)
+                    logger.add_scalar('training_loss_gate', reduced_gate_loss, iteration)
+                    logger.add_scalar('training_loss_nll', reduced_nll_loss, iteration)
+                    logger.add_scalar('learning_rate', learning_rate, iteration)
 
-            if iteration % iters_per_checkpoint == 0:
-                if validate:
-                    val_loss, val_loss_nll, val_loss_gate, attns, gate_pred, gate_target = compute_validation_loss(
-                        model, criterion, valset, collate_fn, batch_size, n_gpus)
-                    if rank == 0:
-                        print("Validation loss {}: {:9f}  ".format(iteration, val_loss))
-                        if with_tensorboard:
-                            logger.log_validation(
-                                val_loss, val_loss_nll, val_loss_gate, attns,
-                                gate_pred, gate_target, iteration)
+                if iteration % iters_per_checkpoint == 0:
+                    if validate:
+                        val_loss, val_loss_nll, val_loss_gate, attns, gate_pred, gate_target = compute_validation_loss(
+                            model, criterion, valset, collate_fn, batch_size, n_gpus)
+                        if rank == 0:
+                            print("Validation loss {}: {:9f}  ".format(iteration, val_loss))
+                            if with_tensorboard:
+                                logger.log_validation(
+                                    val_loss, val_loss_nll, val_loss_gate, attns,
+                                    gate_pred, gate_target, iteration)
                 
-                checkpoint_path = "{}/model_{}.pt".format(
-                                       output_directory, iteration)
-                save_checkpoint(model, optimizer, learning_rate, iteration,
-                                    checkpoint_path)
+                    checkpoint_path = "{}/model_{}.pt".format(
+                                           output_directory, iteration)
+                    save_checkpoint(model, optimizer, learning_rate, iteration,
+                                        checkpoint_path)
 
-            iteration += 1
+                iteration += 1
+            except:
+                print("SOMETHING BAD HAPPENED")
 
 
 if __name__ == "__main__":

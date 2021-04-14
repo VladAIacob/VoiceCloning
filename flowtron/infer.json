@@ -1,19 +1,19 @@
 {
     "train_config": {
         "output_directory": "../data/VoiceCloning/flowtron",
-        "epochs": 10000000,
+        "epochs": 100000,
         "optim_algo": "RAdam",
-        "learning_rate": 1e-3,
+        "learning_rate": 1e-4,
         "weight_decay": 1e-6,
         "grad_clip_val": 1,
-        "sigma": 1.0,
+        "sigma": 0.5,
         "iters_per_checkpoint": 1000,
-        "batch_size": 8,
+        "batch_size": 1,
         "seed": 1234,
         "checkpoint_path": "",
         "ignore_layers": [],
         "finetune_layers": [],
-        "include_layers": ["speaker", "encoder", "embedding"],
+        "include_layers": ["encoder", "embedding"],
         "warmstart_checkpoint_path": "",
         "with_tensorboard": true,
         "fp16_run": true
@@ -40,8 +40,7 @@
         "dist_url": "tcp://localhost:54321"
     },
     "model_config": {
-        "n_speakers": 1,
-        "n_speaker_dim": 128,
+        "n_speaker_features": 256,
         "n_text": 185,
         "n_text_dim": 512,
         "n_flows": 2,
@@ -49,11 +48,10 @@
         "n_attn_channels": 640,
         "n_hidden": 1024,
         "n_lstm_layers": 2,
-        "mel_encoder_n_hidden": 512,
+        "mel_encoder_n_hidden": 256,
         "n_components": 0,
         "mean_scale": 0.0,
         "fixed_gaussian": true,
-        "dummy_speaker_embedding": false,
         "use_gate_layer": true,
         "use_cumm_attention": false
     }
