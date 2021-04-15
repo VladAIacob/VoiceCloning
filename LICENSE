@@ -2,6 +2,16 @@ MIT License
 
 Copyright (c) 2021 Vlad Alexandru Iacob
 
+`````````````````
+Original work:
+SV2TTS https://github.com/CorentinJ/Real-Time-Voice-Cloning modified code by Vlad Alexandru Iacob
+
+NVIDIA/flowtron https://github.com/NVIDIA/flowtron modified code by Vlad Alexandru Iacob
+(removed the speaker embeddings and added custom embeddings dependent on speaker)
+
+NVIDIA/waveglow https://github.com/NVIDIA/waveglow 
+`````````````````
+
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
